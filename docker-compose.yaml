@@ -1,0 +1,61 @@
+x-airflow-common: &airflow-common
+  build: .
+  image: cs611-loan-default-airflow:latest
+  # root so the tasks can write datamart/ and model_bank/ into the mounted project
+  # folder on any host (Linux bind mounts keep the host's file owner)
+  user: "0:0"
+  environment:
+    - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
+    - AIRFLOW__CORE__FERNET_KEY=PAqBeGJLJTYFzVkOGHWIYXdLO7XdXz5yTdxAGJe9ezM=
+    - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    - AIRFLOW__WEBSERVER__SECRET_KEY=cs611-assignment2
+    # packages live in the airflow user's site-packages; lets `docker compose exec` (root) find them
+    - PYTHONPATH=/home/airflow/.local/lib/python3.9/site-packages
+  volumes:
+    - airflow_data:/opt/airflow
+    - ./dags:/opt/airflow/dags
+    - .:/opt/airflow/project
+
+services:
+  airflow-init:
+    <<: *airflow-common
+    command: >
+      bash -c "airflow db init &&
+      airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true"
+
+  airflow-webserver:
+    <<: *airflow-common
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    ports:
+      - "8080:8080"
+    command: webserver
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "-s", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+
+  # prints the address and login in the `docker-compose up` output once the web UI answers
+  airflow-ready:
+    <<: *airflow-common
+    depends_on:
+      airflow-webserver:
+        condition: service_healthy
+    command: >
+      bash -c "echo '==================================================' &&
+      echo 'Airflow is ready:  http://localhost:8080' &&
+      echo 'Username: admin    Password: admin' &&
+      echo '=================================================='"
+
+  airflow-scheduler:
+    <<: *airflow-common
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    command: scheduler
+
+volumes:
+  airflow_data:
